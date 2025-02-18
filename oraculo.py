@@ -2,7 +2,11 @@ import streamlit as st
 from langchain.memory import ConversationBufferMemory
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
+from document_loader import *
+import tempfile
+from langchain.prompts import ChatPromptTemplate
 
+#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
 
 TIPOS_ARQUIVOS_VALIDOS = [
     'Site', 'Youtube', 'pdf', 'csv', 'txt'
@@ -12,26 +16,86 @@ CONFIG_MODELOS = {'Groq': {'modelos': ['llama-3.1-8b-instant', 'gemma2-9b-it', '
                   'OpenAI': {'modelos': ['gpt-4o-mini', 'gpt-4o', 'o1-mini'], 'chat': ChatOpenAI}}
 
 MEMORIA = ConversationBufferMemory()
-MEMORIA.chat_memory.add_user_message('Saudações Oráculo')
-MEMORIA.chat_memory.add_ai_message('Saudações')
 
-def carrega_modelo(provedor, modelo, api_key):
+def carregar_arquivo(tipo_arquivo, arquivo):
+     if tipo_arquivo == 'Site':
+          document = carrega_site(arquivo)
+     if tipo_arquivo == 'Youtube':
+          document = carrega_youtube(arquivo)
+     if tipo_arquivo == 'pdf':
+          with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp:
+               temp.write(arquivo.read())
+               nome_temp = temp.name
+          document = carrega_pdf(nome_temp)
+     if tipo_arquivo == 'csv':
+          with tempfile.NamedTemporaryFile(suffix='.csv', delete=False) as temp:
+               temp.write(arquivo.read())
+               nome_temp = temp.name
+          document = carrega_csv(nome_temp)
+     if tipo_arquivo == 'txt':
+          with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as temp:
+               temp.write(arquivo.read())
+               nome_temp = temp.name
+          document = carrega_txt(nome_temp)
+     return document
+
+def carrega_modelo(provedor, modelo, api_key, tipo_arquivo, arquivo):
+     
+     document = carregar_arquivo(tipo_arquivo, arquivo)
+     
+     system_message = system_message = '''Você é um assistente amigável chamado Oráculo.
+Você possui acesso às seguintes informações vindas 
+de um documento {}: 
+
+####
+{}
+####
+
+Utilize as informações fornecidas para basear as suas respostas.
+
+Sempre que houver $ na sua saída, substita por S.
+
+Se a informação do documento for algo como "Just a moment...Enable JavaScript and cookies to continue" 
+sugira ao usuário carregar novamente o Oráculo!'''.format(tipo_arquivo, document)
+
+     template = ChatPromptTemplate.from_messages([
+          ('system', system_message),
+          ('placeholder', '{chat_history}'),
+          ('user', '{input}')
+     ])  
      chat = CONFIG_MODELOS[provedor]['chat'](model=modelo, api_key=api_key)
-     st.session_state['chat'] = chat
+     chain = template | chat
+     
+     st.session_state['chain'] = chain
+
+
 
 def pagina_chat():
     st.header('🗣️Bem vindo ao Oráculo', divider=True)
-   
-    memoria = st.session_state.get('mensagens', MEMORIA)    
+    chain = st.session_state.get('chain')  
+
+    if chain is None:
+        st.error('Por favor, selecione um modelo e um arquivo para iniciar o Oráculo')
+        st.stop()
+
+    memoria = st.session_state.get('memoria', MEMORIA)  
     for mensagem in memoria.buffer_as_messages:
         chat = st.chat_message(mensagem.type)
         chat.markdown(mensagem.content)
      
     input_usuario = st.chat_input('Fale com o Oráculo')
     if input_usuario:
+        chat = st.chat_message('human')
+        chat.markdown(input_usuario)
+
+        chat = st.chat_message('ai')
+        resposta = chat.write_stream(chain.stream({
+             'input': input_usuario, 
+             'chat_history': memoria.buffer_as_messages}))
+       
         memoria.chat_memory.add_user_message(input_usuario)
+        memoria.chat_memory.add_ai_message(resposta)
         st.session_state['memoria'] = memoria
-        st.rerun()
 
 def sidebar():
     tabs = st.tabs(['Upload de arquivo', 'Selção de Modelo'])
@@ -58,13 +122,14 @@ def sidebar():
          st.session_state[f'api_key_{provedor}'] = api_key
 
     if st.button('Inciar Oráculo', use_container_width=True):
-          carrega_modelo(provedor, modelo, api_key)
-
+          carrega_modelo(provedor, modelo, api_key, tipo_arquivo, arquivo)
+    if st.button('Apagar Histórico', use_container_width=True):
+          st.session_state['memoria'] = MEMORIA
 
 def main():
-     pagina_chat()
      with st.sidebar:
         sidebar()
+     pagina_chat()
 
 if __name__ == '__main__':
     main()
