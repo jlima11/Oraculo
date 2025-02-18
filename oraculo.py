@@ -6,7 +6,6 @@ from document_loader import *
 import tempfile
 from langchain.prompts import ChatPromptTemplate
 
-#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
 
 TIPOS_ARQUIVOS_VALIDOS = [
     'Site', 'Youtube', 'pdf', 'csv', 'txt'
